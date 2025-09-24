@@ -17,6 +17,7 @@ from .tokens import account_activation_token
 router = Router()
 User = get_user_model()  # Reuse User model
 
+
 # ------------------ REGISTER ------------------
 @router.post("/register", response={201: UserOut, 400: dict})
 def register(request: HttpRequest, data: UserRegister):
@@ -71,7 +72,7 @@ def login_user(request: HttpRequest, data: UserLogin):
     return 200, {
         "message": "Login successful",
         "user": UserOut.from_orm(user),
-        "token": "your-jwt-token-here"  # Replace with real JWT later
+        "token": "your-jwt-token-here",  # Replace with real JWT later
     }
 
 
@@ -104,14 +105,18 @@ def update_profile(request: HttpRequest, phone: str = None, username: str = None
     user.save()
     return user
 
+
 def urlsafe_base64_encode(s):
     raise NotImplementedError
+
 
 def force_bytes(value):
     raise NotImplementedError
 
+
 def get_current_site(request):
     raise NotImplementedError
+
 
 def send_mail(subject, message, from_email, recipient_list, fail_silently):
     raise NotImplementedError

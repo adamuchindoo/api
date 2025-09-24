@@ -8,3 +8,11 @@ sqlparse==0.5.3
 typing-inspection==0.4.1
 typing_extensions==4.14.1
 daphne==4.2.1
+cffi==2.0.0
+cryptography==45.0.7
+django-cors-headers==4.8.0
+django-environ==0.12.0
+environ==1.0
+pycparser==2.23
+PyJWT==2.10.1
+psycopg2-binary==2.9.10
