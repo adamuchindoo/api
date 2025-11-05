@@ -680,6 +680,7 @@ def profile_switch(request,role_id: str):
             data="Yes, professional profile"
         )
 
+
     elif hasattr(user, 'b2b') and str(user.b2b.id) == role_id:
         business_profile = get_object_or_404(Business_profile, id=role_id)
         user.role = business_profile.role
