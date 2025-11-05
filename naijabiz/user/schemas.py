@@ -1,7 +1,10 @@
 # user/schemas.py
 from ninja import Schema
 from pydantic import Field
-from typing import Optional, List
+from typing import Optional, List, Any
+from uuid import UUID
+from pydantic import validator, root_validator
+from .schema_helper import phone_number_validation, business_name
 
 
 class UserOut(Schema):
@@ -15,18 +18,10 @@ class UserOut(Schema):
 
 
 class UserRegister(Schema):
-    username: str
+    phone: Optional[str] = None
     email: str
     password: str = Field(..., min_length=6)
     confirm_password: str = Field(..., min_length=6)
-    role: str = "b2c"
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    other_name: Optional[str] = None
-    phone: Optional[str] = None
-    state_id: Optional[str] = None
-    lga_id: Optional[str] = None
-    contact_address: Optional[str] = None
 
 
 class UserLogin(Schema):
@@ -133,17 +128,59 @@ class Update_lga_Schema(Schema):
     state_id: Optional[int] = None
     name: Optional[str] = None
 
+
 class AccountInfoSchema(Schema):
-    first_name: Optional[str]=None
-    last_name:  Optional[str]=None
-    other_name:  Optional[str]=None
-    contact_addrss:  Optional[str]=None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    other_name: Optional[str] = None
+    contact_addrss: Optional[str] = None
     username: str
-    email:  Optional[str]=None
+    email: Optional[str] = None
     role: str
-    phone:  Optional[str]=None
-    region: Optional[str]=None
-    state:  Optional[str]=None
-    lga:  Optional[str]=None
+    phone: Optional[str] = None
+    region: Optional[str] = None
+    state: Optional[str] = None
+    lga: Optional[str] = None
     account_status: bool
-    
+
+
+class APIResponse(Schema):
+    success: bool
+    message: str
+    data: Any
+
+
+class Bushiness_profile_Schema(Schema):
+    business_name: str
+    category_id: UUID
+    business_phone_number: str
+    aditional_phone_number: Optional[str]
+    business_address: str
+    region_id: int
+    state_id: int
+    lga_id: int
+    market_region_id: UUID
+    website: Optional[str]
+    cac_registration_number: str
+    tax_identification_number: str
+    owner_full_name: str
+    nin_number: str
+    address: str
+
+    _validate_business_phone = validator("business_phone_number", allow_reuse=True)(
+        phone_number_validation
+    )
+    _aditional_phone_number = validator("aditional_phone_number", allow_reuse=True)(
+        phone_number_validation
+    )
+    _business_name = validator("business_name", allow_reuse=True)(business_name)
+
+
+class Professional_profile_Schema(Schema):
+    full_name: str
+    short_bio: str
+    years_of_experiance: str
+    expertise_area_id: str
+    website: Optional[str]
+    certification_reg_no: str
+    tax_identification_number: str

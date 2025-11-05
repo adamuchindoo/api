@@ -1,7 +1,26 @@
 from ninja import NinjaAPI
 from django.http import HttpRequest
+from datetime import datetime, timedelta
+import random
+from ninja.files import UploadedFile
+from ninja import File
+from django.core.mail import send_mail
 from .auth import get_current_user, validate_crftoken
-from .models import User as users, RefreshSession, User, Region, State, LGA
+from .models import (
+    User as users,
+    RefreshSession,
+    User,
+    Region,
+    State,
+    LGA,
+    EmailValidation,
+    Business_profile,
+    Business_categories,
+    Market_region,
+    Expertise_area,
+    Professional_profile,
+    User_role,
+)
 from ninja import Router, Query
 from django.contrib.auth.hashers import make_password, check_password
 from django.http import JsonResponse
@@ -18,11 +37,11 @@ from django.db.models import Prefetch
 from .utils.utils import send_verification_email
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
-from .tokens import account_activation_token
+from .helper import generate_unique_username, save_uploaded_file
 from .schemas import (
     UserLogin,
     Error_out,
-    Login_response,
+    APIResponse,
     UserOut,
     UserRegister,
     UserLogin,
@@ -36,7 +55,9 @@ from .schemas import (
     BulkLGSRequest,
     LGAListResponse,
     Update_lga_Schema,
-    AccountInfoSchema
+    AccountInfoSchema,
+    Bushiness_profile_Schema,
+    Professional_profile_Schema,
 )
 
 from .utils.jwt import create_access_token, create_refresh_token, decode_token
@@ -325,7 +346,7 @@ def update_lga(request, payload: Update_lga_Schema):
     "/register",
     response={201: UserOut, 400: dict},
     auth=None,
-    tags=["Web Authentication"],
+    tags=["Create account (Web)"],
 )
 def register(request: HttpRequest, data: UserRegister):
     if data.password != data.confirm_password:
@@ -333,58 +354,76 @@ def register(request: HttpRequest, data: UserRegister):
 
     if User.objects.filter(email=data.email).exists():
         return 400, {"message": "Email already registered"}
+    role = get_object_or_404(User_role, code="b2c")
 
-    if User.objects.filter(username=data.username).exists():
-        return 400, {"message": "Username already taken"}
-
-    lga = get_object_or_404(
-        LGA.objects.select_related("state__region"),
-        id=data.lga_id
-    )
-    if str(lga.state.id) != data.state_id:
-        return JsonResponse({"message": f"LGA does not belong to the given State st-{lga.state.id}"}, status=404)
-
-    state = lga.state
-    region = state.region
-    
     user = User.objects.create_user(
-        username=data.username,
+        username=generate_unique_username(),
         email=data.email,
         password=data.password,
-        role=data.role,
         phone=data.phone,
-        region=region,
-        state = state,
-        lga = lga,
-        first_name =data.first_name,
-        last_name =data.last_name,
-        other_name =data.other_name,
-        contact_address = data.contact_address,
+        role=role,
         is_active=False,  # Wait for email verification
     )
     return JsonResponse({"message": f"Account created successfully"}, status=200)
 
-    
-# ------------------ VERIFY EMAIL ------------------
-@router.get(
-    "/verify-email/{uidb64}/{token}/",
-    response={200: dict, 400: dict},
-    tags=["Web Authentication"],
-)
-def verify_email(request: HttpRequest, uidb64: str, token: str):
-    try:
-        uid = force_str(urlsafe_base64_decode(uidb64))
-        user = get_object_or_404(User, pk=uid)
-    except Exception:
-        return 400, {"message": "Invalid verification link"}
 
-    if account_activation_token.check_token(user, token):
-        user.is_verified = True
-        user.is_active = True
-        user.save()
-        return 200, {"message": "Email verified successfully. You can now log in."}
-    else:
-        return 400, {"message": "Invalid or expired token"}
+@router.get(
+    "/request-email-validation",
+    tags=["Create account (Web)"],
+    response={400: dict, 200: APIResponse},
+)
+def new_user_email_validation_request(request):
+    user_id = get_current_user(request)
+    user = get_object_or_404(User.objects, pk=user_id)
+
+    if user.is_verified:
+        return 200, APIResponse(
+            success=True,
+            message="Email already verifed",
+            data="Your email has already been verified.",
+        )
+    # Delete existing unused OTPs for this user
+    EmailValidation.objects.filter(email=user.email).delete()
+    otp_code = str(random.randint(100000, 999999))
+    expires_at = datetime.now() + timedelta(minutes=15)
+    EmailValidation.objects.create(
+        email=user.email, code=otp_code, expires_at=expires_at
+    )
+    send_mail(
+        "Email Validation OTP",
+        f"Your OTP for E-mail validation is: {otp_code} (valid for 15 minutes)",
+        "noreply@example.com",
+        [user.email],
+        fail_silently=False,
+    )
+    more_details = {"note": "Please check your email — we have sent you an OTP"}
+    return 200, APIResponse(
+        success=True, message="Otp send successfully", data=more_details
+    )
+
+
+@router.get("/email-validate/{otp}", tags=["Create account (Web)"])
+def email_validations(request, otp: int):
+    user_id = get_current_user(request)
+    user = get_object_or_404(User.objects, pk=user_id)
+    try:
+        otp_record = EmailValidation.objects.get(
+            email=user.email,
+            code=otp,
+            is_used=False,
+            expires_at__gte=datetime.now(),
+        )
+    except EmailValidation.DoesNotExist:
+        return JsonResponse({"detail": "Invalid OTP or Email"}, status=400)
+
+    # Mark OTP as used
+    otp_record.is_used = True
+    otp_record.save()
+
+    user.is_verified = True
+    user.save()
+
+    return {"detail": "Your email has been successfully verified."}
 
 
 # --- LOGIN ---
@@ -441,7 +480,7 @@ def login(request, data: UserLogin):
         value=csrf_token,
         httponly=False,
         secure=True,
-        samesite="Lax",
+        samesite="None",
         path="/",
         max_age=900,  # Match access token lifespan
     )
@@ -449,26 +488,211 @@ def login(request, data: UserLogin):
     return response
 
 
-@router.get("/profile", response={200:AccountInfoSchema}, tags=["Account managemeent info (web)"])
+@router.post(
+    "/create-business-profile",
+    response={200: APIResponse, 400: APIResponse, 403: APIResponse},
+    tags=["User Roles (web)"],
+)
+def create_business_profile(
+    request,
+    payload: Bushiness_profile_Schema,
+    cac_certificate: UploadedFile = File(...),
+    trade_license: UploadedFile = File(...),
+):
+    user_id = get_current_user(request)
+    user = get_object_or_404(User.objects, pk=user_id)
+    if not user.email:
+        more_details = {
+            "details": "Email not verified. Please check your inbox for the verification link."
+        }
+        return 403, APIResponse(
+            success=True, message="EMAIL_NOT_VERIFIED", data=more_details
+        )
+    region = get_object_or_404(Region, id=payload.region_id)
+    state = get_object_or_404(State, id=payload.state_id, region=region)
+    lga = get_object_or_404(LGA, id=payload.lga_id, state=state)
+    business_category = get_object_or_404(Business_categories, id=payload.category_id)
+    market_region = get_object_or_404(Market_region, id=payload.market_region_id)
+
+    try:
+        # Save the uploaded CAC certificate
+        cac_file_path = save_uploaded_file(cac_certificate, "cac_certificates")
+
+        # Save the uploaded logo (if provided)
+        trade_license_path = save_uploaded_file(trade_license, "trade_license")
+
+    except Exception as e:
+        # Handle file upload errors gracefully
+        return 400, {"status": "Error", "message": f"Failed to upload files: {str(e)}"}
+
+    business_profile = Business_profile.objects.create(
+        user=user,
+        business_name=payload.business_name,
+        category=business_category,
+        business_phone_number=payload.business_phone_number,
+        aditional_phone_number=payload.aditional_phone_number,
+        business_address=payload.business_address,
+        region=region,
+        state=state,
+        lga=lga,
+        market_region=market_region,
+        website=payload.website,
+        cac_registration_number=payload.cac_registration_number,
+        cac_file=cac_file_path,
+        trade_license=trade_license_path,
+        tax_identification_number=payload.tax_identification_number,
+        owner_full_name=payload.owner_full_name,
+        nin_number=payload.nin_number,
+        address=payload.address,
+    )
+    return 200, APIResponse(
+        success=True, message=f"Business profile submit successfully", data="done"
+    )
+
+
+@router.post(
+    "/create-professional-profile",
+    response={200: APIResponse, 400: APIResponse, 403: APIResponse},
+    tags=["User Roles (web)"],
+)
+def create_professional_profile(
+    request,
+    payload: Professional_profile_Schema,
+    certificate: UploadedFile = File(...),
+):
+    user_id = get_current_user(request)
+    user = get_object_or_404(User.objects, pk=user_id)
+    if not user.email:
+        more_details = {
+            "details": "Email not verified. Please check your inbox for the verification link."
+        }
+        return 403, APIResponse(
+            success=True, message="EMAIL_NOT_VERIFIED", data=more_details
+        )
+
+    expertise_area = get_object_or_404(Expertise_area, id=payload.expertise_area_id)
+
+    try:
+        certificate_file_path = save_uploaded_file(
+            certificate, "professional_certificates"
+        )
+    except Exception as e:
+        return 400, {"status": "Error", "message": f"Failed to upload files: {str(e)}"}
+
+    professional_profile = Professional_profile.objects.create(
+        user=user,
+        full_name=payload.full_name,
+        short_bio=payload.short_bio,
+        years_of_experiance=payload.years_of_experiance,
+        expertise_area=expertise_area,
+        website=payload.website,
+        certification_reg_no=payload.certification_reg_no,
+        tax_identification_number=payload.tax_identification_number,
+        certificate_file=certificate_file_path,
+    )
+    return 200, APIResponse(
+        success=True, message=f"Professional profile submit successfully", data="done"
+    )
+
+
+@router.get(
+    "/profile",
+    response={200: AccountInfoSchema},
+    tags=["Account managemeent info (web)"],
+)
 def profile(request):
     user_id = get_current_user(request)
-    user = get_object_or_404(User.objects.select_related("region","state", "lga"), pk=user_id)
-    return 200,AccountInfoSchema(
+    user = get_object_or_404(
+        User.objects.select_related("region", "state", "lga"), pk=user_id
+    )
+    return 200, AccountInfoSchema(
         first_name=user.first_name if user.first_name else None,
         last_name=user.last_name if user.last_name else None,
         other_name=user.other_name if user.other_name else None,
         contact_addrss=user.contact_address if user.contact_address else None,
         username=user.username,
         email=user.email if user.email else None,
-        role=user.role ,
+        role=user.role.name,
         phone=user.phone if user.email else None,
-        region=user.region.name if user.region else None, 
+        region=user.region.name if user.region else None,
         state=user.state.name if user.state else None,
         lga=user.lga.name if user.lga else None,
-        account_status=user.is_active
+        account_status=user.is_active,
     )
 
 
+@router.get(
+    "/get-all-profile/",
+    response={200: APIResponse},
+    tags=["User Roles (web)"],
+)
+def get_all_profile(request):
+    user_id = get_current_user(request)
+    user = get_object_or_404(User.objects.prefetch_related('professional_user','b2b'), pk=user_id)
+    profile_list = []
+    profile_list.append(
+        {
+             "id":"b2c",
+             "name":"Consumer"
+        }
+     )
+    try:
+     professional = user.professional_user
+     profile_list.append(
+        {
+             "id":professional.id,
+             "name":professional.role.name
+        }
+     )
+    except Professional_profile.DoesNotExist:
+     pass
+ 
+    try:
+     business_profile = user.b2b
+     profile_list.append(
+        {
+             "id":business_profile.id,
+             "name":business_profile.role.name
+        }
+     )
+    except Business_profile.DoesNotExist:
+     pass
+    return 200, APIResponse(
+        success=True, message=f"Professional profile submit successfully", data=profile_list
+    )
+    
+@router.get(
+    "/switch-profile/{role_id}",
+    response={200: APIResponse},
+    tags=["User Roles (web)"],
+)
+def profile_switch(request,role_id: str):
+    user_id = get_current_user(request)
+    user = get_object_or_404(User.objects.prefetch_related('professional_user','b2b'), pk=user_id)
+  
+    if hasattr(user, 'professional_user') and str(user.professional_user.id) == role_id:
+        professional_profile_profile = get_object_or_404(Professional_profile, id=role_id)
+        user.role = professional_profile_profile.role
+        user.save(update_fields=['role'])
+        return APIResponse(
+            success=True,
+            message="Professional profile submit successfully",
+            data="Yes, professional profile"
+        )
+
+    elif hasattr(user, 'b2b') and str(user.b2b.id) == role_id:
+        business_profile = get_object_or_404(Business_profile, id=role_id)
+        user.role = business_profile.role
+        user.save(update_fields=['role'])
+        return APIResponse(
+            success=True,
+            message="Business profile submit successfully",
+            data="Yes, business profile"
+        )  
+    else:
+       return 200, APIResponse(
+        success=True, message=f"Professional profile submit successfully", data="No No"
+    )  
 
 @router.post("/refresh-token", tags=["Web Authentication"])
 def refresh_token(request):

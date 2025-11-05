@@ -8,39 +8,59 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('user', '0004_region_state_lga'),
+        ("user", "0004_region_state_lga"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='user',
-            name='contact_address',
+            model_name="user",
+            name="contact_address",
             field=models.CharField(blank=True, max_length=250, null=True),
         ),
         migrations.AddField(
-            model_name='user',
-            name='created_at',
-            field=models.DateTimeField(auto_now_add=True, default=django.utils.timezone.now),
+            model_name="user",
+            name="created_at",
+            field=models.DateTimeField(
+                auto_now_add=True, default=django.utils.timezone.now
+            ),
             preserve_default=False,
         ),
         migrations.AddField(
-            model_name='user',
-            name='lga',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='lga', to='user.lga'),
+            model_name="user",
+            name="lga",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="lga",
+                to="user.lga",
+            ),
         ),
         migrations.AddField(
-            model_name='user',
-            name='other_name',
+            model_name="user",
+            name="other_name",
             field=models.CharField(blank=True, max_length=50, null=True),
         ),
         migrations.AddField(
-            model_name='user',
-            name='region',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='region', to='user.region'),
+            model_name="user",
+            name="region",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="region",
+                to="user.region",
+            ),
         ),
         migrations.AddField(
-            model_name='user',
-            name='state',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='state', to='user.state'),
+            model_name="user",
+            name="state",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="state",
+                to="user.state",
+            ),
         ),
     ]
